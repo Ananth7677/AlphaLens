@@ -1342,8 +1342,7 @@ This project is proprietary and confidential.
 ## 📧 Contact
 
 **Project Lead**: Ananth Nityandal  
-**Email**: [Your Email]  
-**GitHub**: [Your GitHub]
+**Email**: ananthnityandal2000@gmail.com
 
 ---
 
