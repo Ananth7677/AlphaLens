@@ -12,6 +12,7 @@ Score Range: 0-100 (higher is better)
 """
 
 from typing import Optional, List, Union
+from ._units import to_percent
 
 
 def calculate_moat_score(financials: Union[dict, List[dict]]) -> dict:
@@ -139,7 +140,12 @@ def _calculate_margin_score(financials: dict) -> Optional[float]:
         revenue = financials.get("revenue")
         if net_income and revenue and revenue > 0:
             net_margin = (net_income / revenue) * 100
-    
+
+    # Margins may be stored as fractions (0.45) — normalize to percentages
+    gross_margin = to_percent(gross_margin)
+    operating_margin = to_percent(operating_margin)
+    net_margin = to_percent(net_margin)
+
     margin_scores = []
     
     # Gross Margin Score

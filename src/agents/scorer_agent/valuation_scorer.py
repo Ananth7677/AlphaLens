@@ -26,12 +26,18 @@ def calculate_valuation_score(financials: Union[dict, List[dict]], industry_avg:
     Returns:
         Dict with score (0-100) and component breakdowns
     """
+    # Handle both dict and list inputs (tests pass lists); use most recent
+    if isinstance(financials, list):
+        if not financials:
+            return {"score": None, "error": "No financial data"}
+        financials = financials[0]
+
     if not financials:
         return {"score": None, "error": "No financial data"}
-    
+
     scores = {}
     weights = {}
-    
+
     # 1. PE Ratio Score (35% weight)
     pe_score = _calculate_pe_score(financials)
     if pe_score is not None:

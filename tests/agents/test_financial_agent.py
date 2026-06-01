@@ -6,44 +6,64 @@ Tests Yahoo Finance and FMP integration, data normalization, and database storag
 """
 
 import pytest
+from contextlib import ExitStack
 from unittest.mock import Mock, patch, AsyncMock
 from datetime import datetime
 from src.agents.financial_agent import fetch_and_store_financials
 
 
+def _patch_financial_pipeline(yahoo_data, fmp_data):
+    """Patch the financial agent's data sources and DB repositories.
+
+    fetch_and_store_financials(db, ticker) fetches from Yahoo/FMP, normalizes,
+    and writes via the repositories — all of which we stub so the test needs no
+    network or database.
+    """
+    stack = ExitStack()
+    stack.enter_context(patch('src.agents.financial_agent.fetch_yahoo_data',
+                              new=AsyncMock(return_value=yahoo_data)))
+    stack.enter_context(patch('src.agents.financial_agent.fetch_fmp_data',
+                              new=AsyncMock(return_value=fmp_data)))
+    stack.enter_context(patch('src.dbo.repositories.company_repo.get_or_create',
+                              new=AsyncMock(return_value=(Mock(), False))))
+    stack.enter_context(patch('src.dbo.repositories.financials_repo.upsert',
+                              new=AsyncMock(return_value=Mock())))
+    stack.enter_context(patch('src.dbo.repositories.fetch_log_repo.log_fetch',
+                              new=AsyncMock()))
+    return stack
+
+
 class TestFinancialAgentIntegration:
-    """Test complete financial agent workflow."""
-    
+    """Test complete financial agent workflow (fetch_and_store_financials(db, ticker))."""
+
     @pytest.mark.asyncio
-    @patch('src.agents.financial_agent.yahoo_finance.yf.Ticker')
-    async def test_fetch_and_store_success(self, mock_ticker):
+    async def test_fetch_and_store_success(self):
         """Test successful data fetch and storage."""
-        # Mock Yahoo Finance response
-        mock_info = {
+        yahoo_data = {
             'symbol': 'AAPL',
-            'totalRevenue': 383285000000,
-            'grossProfits': 169148000000,
-            'totalAssets': 352755000000,
-            'totalLiabilities': 290437000000,
-            'totalCash': 29965000000,
-            'currentRatio': 0.97,
+            'revenue': 383285000000,
+            'net_income': 96995000000,
+            'current_ratio': 0.97,
+            'market_cap': 2900000000000,
         }
-        
-        mock_ticker.return_value.info = mock_info
-        
-        result = await fetch_and_store_financials('AAPL')
-        
+        db = AsyncMock()
+        with _patch_financial_pipeline(yahoo_data, fmp_data=None):
+            result = await fetch_and_store_financials(db, 'AAPL')
+
         assert result['ticker'] == 'AAPL'
-        assert 'yahoo' in result or 'stored' in result
-    
+        assert result['yahoo'] == 'success'
+        assert result['stored'] is True
+
     @pytest.mark.asyncio
     async def test_fetch_invalid_ticker(self):
-        """Test handling of invalid ticker."""
-        result = await fetch_and_store_financials('INVALID123')
-        
-        # Should handle gracefully
+        """Test handling of a ticker with no data from any source."""
+        db = AsyncMock()
+        with _patch_financial_pipeline(yahoo_data=None, fmp_data=None):
+            result = await fetch_and_store_financials(db, 'INVALID123')
+
         assert isinstance(result, dict)
         assert result['ticker'] == 'INVALID123'
+        assert result['yahoo'] == 'failed'
 
 
 class TestDataValidation:

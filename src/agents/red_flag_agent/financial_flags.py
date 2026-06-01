@@ -13,6 +13,13 @@ Analyzes financial data for warning signs:
 from typing import List, Dict, Optional, Union
 
 
+def _to_pct(value: Optional[float]) -> Optional[float]:
+    """Normalize a margin that may be a fraction (0.45) into a percentage (45)."""
+    if value is None:
+        return None
+    return value * 100 if abs(value) <= 1.5 else value
+
+
 def detect_financial_flags(financials: Union[dict, List[dict]], historical: List[dict] = None) -> List[dict]:
     """
     Detect financial red flags from current and historical data.
@@ -54,7 +61,11 @@ def detect_financial_flags(financials: Union[dict, List[dict]], historical: List
     # 5. Asset Quality Flags
     asset_flags = _check_asset_quality(current)
     flags.extend(asset_flags)
-    
+
+    # 6. Profitability Flags (net losses / negative margins)
+    profitability_flags = _check_profitability(current)
+    flags.extend(profitability_flags)
+
     return flags
 
 
@@ -106,12 +117,14 @@ def _check_margin_trends(current: dict, historical: List[dict] = None) -> List[d
     if not historical or len(historical) < 1:
         return flags
     
-    current_gross_margin = current.get("gross_margin")
-    current_operating_margin = current.get("operating_margin")
-    
+    # Margins may be stored as fractions (0.45) — normalize to percentages so the
+    # percentage-point decline thresholds below are meaningful.
+    current_gross_margin = _to_pct(current.get("gross_margin"))
+    current_operating_margin = _to_pct(current.get("operating_margin"))
+
     prior = historical[-1]  # Most recent historical
-    prior_gross_margin = prior.get("gross_margin")
-    prior_operating_margin = prior.get("operating_margin")
+    prior_gross_margin = _to_pct(prior.get("gross_margin"))
+    prior_operating_margin = _to_pct(prior.get("operating_margin"))
     
     # Gross margin deterioration
     if current_gross_margin is not None and prior_gross_margin is not None:
@@ -241,6 +254,45 @@ def _check_debt_levels(current: dict, historical: List[dict] = None) -> List[dic
             "description": f"Low current ratio: {current_ratio:.2f}. Limited liquidity cushion."
         })
     
+    return flags
+
+
+def _check_profitability(current: dict) -> List[dict]:
+    """Check for outright unprofitability (net loss or negative margins)."""
+    flags = []
+
+    net_income = current.get("net_income")
+    if net_income is not None and net_income < 0:
+        flags.append({
+            "category": "FINANCIAL",
+            "severity": "HIGH",
+            "flag_type": "NET_LOSS",
+            "title": "Net Loss",
+            "description": f"Company reported a net loss of {net_income/1e9:.2f}B."
+        })
+        return flags
+
+    # If net income isn't available, fall back to margins
+    net_margin = _to_pct(current.get("net_margin"))
+    operating_margin = _to_pct(current.get("operating_margin"))
+
+    if net_margin is not None and net_margin < 0:
+        flags.append({
+            "category": "FINANCIAL",
+            "severity": "HIGH",
+            "flag_type": "NEGATIVE_MARGIN",
+            "title": "Negative Net Margin",
+            "description": f"Negative net margin: {net_margin:.1f}%. Company is operating at a loss."
+        })
+    elif operating_margin is not None and operating_margin < 0:
+        flags.append({
+            "category": "FINANCIAL",
+            "severity": "HIGH",
+            "flag_type": "NEGATIVE_MARGIN",
+            "title": "Negative Operating Margin",
+            "description": f"Negative operating margin: {operating_margin:.1f}%. Core operations unprofitable."
+        })
+
     return flags
 
 

@@ -11,6 +11,7 @@ Score Range: 0-100 (higher is better)
 """
 
 from typing import Optional, Union, List
+from ._units import to_percent
 
 
 def calculate_financial_health_score(financials: Union[dict, List[dict]]) -> dict:
@@ -185,7 +186,10 @@ def _calculate_cashflow_quality(financials: dict) -> Optional[float]:
         revenue = financials.get("revenue")
         if revenue and revenue > 0:
             fcf_margin = (free_cash_flow / revenue) * 100
-    
+
+    # fcf_margin may be stored as a fraction (0.25) — normalize to percent
+    fcf_margin = to_percent(fcf_margin)
+
     if fcf_margin is not None:
         if fcf_margin >= 20:
             return 100

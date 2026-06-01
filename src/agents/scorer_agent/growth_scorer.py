@@ -11,6 +11,7 @@ Score Range: 0-100 (higher is better)
 """
 
 from typing import Optional, List, Union
+from ._units import to_percent
 
 
 def calculate_growth_score(financials: Union[dict, List[dict]], historical_data: list = None) -> dict:
@@ -176,10 +177,13 @@ def _calculate_margin_trend_score(financials: dict, historical_data: list = None
         
         if operating_income and revenue and revenue > 0:
             operating_margin = (operating_income / revenue) * 100
-    
+
+    # Operating margin may be stored as a fraction (0.30) — normalize to percent
+    operating_margin = to_percent(operating_margin)
+
     if operating_margin is None:
         return None
-    
+
     # Base score from current margin
     if operating_margin >= 25:
         base_score = 95
@@ -207,6 +211,7 @@ def _calculate_margin_trend_score(financials: dict, historical_data: list = None
             prior_revenue = historical_data[0].get("revenue")
             if prior_op_income and prior_revenue and prior_revenue > 0:
                 prior_margin = (prior_op_income / prior_revenue) * 100
+        prior_margin = to_percent(prior_margin)
         
         if prior_margin is not None:
             margin_change = operating_margin - prior_margin

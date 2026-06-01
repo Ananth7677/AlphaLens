@@ -17,37 +17,41 @@ class TestNewsScraper:
     """Test news fetching from multiple sources."""
     
     @pytest.mark.asyncio
+    @patch('src.agents.news_agent.news_scraper._fetch_yahoo_news', new_callable=AsyncMock, return_value=[])
     @patch('yfinance.Ticker')
-    async def test_fetch_yfinance_news(self, mock_ticker):
-        """Test fetching news from yfinance."""
+    async def test_fetch_yfinance_news(self, mock_ticker, _mock_rss):
+        """Test fetching news from yfinance (real parser, recent dates)."""
+        from datetime import datetime, timezone
+        recent = datetime.now(timezone.utc).isoformat()
+        # yfinance nests the article fields under item['content']
         mock_news = [
             {
-                'title': 'Apple Reports Strong Q4 Earnings',
-                'link': 'https://example.com/article1',
-                'publisher': 'Reuters',
-                'providerPublishTime': 1705320000,
                 'content': {
-                    'summary': 'Apple Inc. reported record quarterly earnings...'
+                    'title': 'Apple Reports Strong Q4 Earnings',
+                    'summary': 'Apple Inc. reported record quarterly earnings...',
+                    'pubDate': recent,
+                    'canonicalUrl': {'url': 'https://example.com/article1'},
+                    'provider': {'displayName': 'Reuters'},
                 },
             },
             {
-                'title': 'iPhone Sales Surge in Holiday Quarter',
-                'link': 'https://example.com/article2',
-                'publisher': 'Bloomberg',
-                'providerPublishTime': 1705234000,
                 'content': {
-                    'summary': 'Strong iPhone 15 demand drives revenue growth...'
+                    'title': 'iPhone Sales Surge in Holiday Quarter',
+                    'summary': 'Strong iPhone demand drives revenue growth...',
+                    'pubDate': recent,
+                    'canonicalUrl': {'url': 'https://example.com/article2'},
+                    'provider': {'displayName': 'Bloomberg'},
                 },
             },
         ]
-        
+
         mock_ticker.return_value.news = mock_news
-        
+
         articles = await fetch_news('AAPL')
-        
+
         assert len(articles) > 0
-        assert articles[0]['title'] is not None
-        assert articles[0]['url'] is not None
+        assert articles[0]['title']
+        assert articles[0]['url']
     
     @pytest.mark.asyncio
     @patch('src.agents.news_agent.news_scraper.feedparser.parse')
@@ -201,8 +205,8 @@ class TestNewsAgentIntegration:
     """Test complete news agent workflow."""
     
     @pytest.mark.asyncio
-    @patch('src.agents.news_agent.news_scraper.fetch_news')
-    @patch('src.agents.news_agent.sentiment_analyzer.analyze_sentiment')
+    @patch('src.agents.news_agent.fetch_news')
+    @patch('src.agents.news_agent.analyze_sentiment')
     async def test_analyze_news_success(self, mock_sentiment, mock_fetch):
         """Test successful news analysis."""
         mock_fetch.return_value = [
@@ -247,7 +251,7 @@ class TestNewsAgentIntegration:
         assert 'negative_pct' in result['sentiment_summary']
     
     @pytest.mark.asyncio
-    @patch('src.agents.news_agent.news_scraper.fetch_news')
+    @patch('src.agents.news_agent.fetch_news')
     async def test_analyze_news_no_articles(self, mock_fetch):
         """Test analysis with no articles found."""
         mock_fetch.return_value = []
@@ -258,7 +262,7 @@ class TestNewsAgentIntegration:
         assert result['sentiment_summary']['total'] == 0
     
     @pytest.mark.asyncio
-    @patch('src.agents.news_agent.news_scraper.fetch_news')
+    @patch('src.agents.news_agent.fetch_news')
     async def test_analyze_news_error(self, mock_fetch):
         """Test handling of news fetching errors."""
         mock_fetch.side_effect = Exception("Fetch Error")
@@ -268,8 +272,8 @@ class TestNewsAgentIntegration:
         assert 'error' in result or result.get('error') is not None
     
     @pytest.mark.asyncio
-    @patch('src.agents.news_agent.news_scraper.fetch_news')
-    @patch('src.agents.news_agent.sentiment_analyzer.analyze_sentiment')
+    @patch('src.agents.news_agent.fetch_news')
+    @patch('src.agents.news_agent.analyze_sentiment')
     async def test_sentiment_aggregation(self, mock_sentiment, mock_fetch):
         """Test sentiment score aggregation."""
         mock_fetch.return_value = [
@@ -327,8 +331,8 @@ class TestEdgeCases:
         assert 'sentiment' in result
     
     @pytest.mark.asyncio
-    @patch('src.agents.news_agent.news_scraper.fetch_news')
-    @patch('src.agents.news_agent.sentiment_analyzer.analyze_sentiment')
+    @patch('src.agents.news_agent.fetch_news')
+    @patch('src.agents.news_agent.analyze_sentiment')
     async def test_mixed_sentiment(self, mock_sentiment, mock_fetch):
         """Test handling of equal positive and negative articles."""
         mock_fetch.return_value = [

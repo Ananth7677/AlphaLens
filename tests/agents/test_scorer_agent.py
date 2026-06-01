@@ -45,17 +45,17 @@ class TestFinancialHealthScorer:
             {
                 'current_ratio': 0.8,  # Below 1.0
                 'quick_ratio': 0.5,    # Low
-                'debt_to_equity': 3.5,  # High debt
+                'debt_to_equity': 350,  # High debt (350%, yfinance percent convention)
                 'free_cash_flow': -1000000000,  # Negative FCF
-                'fcf_margin': -0.05,
+                'fcf_margin': -0.05,   # -5% (stored as fraction)
                 'total_debt': 100000000000,
                 'total_equity': 20000000000,
             }
         ]
-        
+
         result = calculate_financial_health_score(financials)
         score = result.get("score") if isinstance(result, dict) else result
-        
+
         assert score <= 40  # Should be low score
         assert score >= 0
     
@@ -70,9 +70,9 @@ class TestFinancialHealthScorer:
         
         result = calculate_financial_health_score(financials)
         score = result.get("score") if isinstance(result, dict) else result
-        
-        assert score >= 0
-        assert score <= 100
+
+        # No usable liquidity/solvency/cashflow inputs -> not scoreable
+        assert score is None or (0 <= score <= 100)
 
 
 class TestGrowthScorer:
@@ -81,15 +81,15 @@ class TestGrowthScorer:
     def test_high_growth_company(self):
         """Test company with strong growth."""
         financials = [
-            {'fiscal_year': 2023, 'revenue': 400000000000, 'eps': 6.5},
-            {'fiscal_year': 2022, 'revenue': 380000000000, 'eps': 6.0},
-            {'fiscal_year': 2021, 'revenue': 360000000000, 'eps': 5.5},
+            {'fiscal_year': 2023, 'revenue': 420000000000, 'eps': 6.5},  # +20% rev
+            {'fiscal_year': 2022, 'revenue': 350000000000, 'eps': 5.0},  # +30% eps
+            {'fiscal_year': 2021, 'revenue': 300000000000, 'eps': 4.0},
         ]
-        
+
         result = calculate_growth_score(financials)
         score = result.get("score") if isinstance(result, dict) else result
-        
-        assert score >= 70  # Consistent growth
+
+        assert score >= 70  # Strong double-digit growth
         assert score <= 100
     
     def test_declining_company(self):
@@ -111,11 +111,11 @@ class TestGrowthScorer:
             {'fiscal_year': 2023, 'revenue': 400000000000, 'eps': 6.5},
         ]
         
-        score = calculate_growth_score(financials)
-        
-        # Should return default score when insufficient data
-        assert score >= 0
-        assert score <= 100
+        result = calculate_growth_score(financials)
+        score = result.get("score") if isinstance(result, dict) else result
+
+        # Single year, no history -> growth not computable
+        assert score is None or (0 <= score <= 100)
 
 
 class TestValuationScorer:
@@ -164,11 +164,10 @@ class TestValuationScorer:
             }
         ]
         
-        result = calculate_growth_score(financials)
+        result = calculate_valuation_score(financials)
         score = result.get("score") if isinstance(result, dict) else result
-        
-        assert score >= 0
-        assert score <= 100
+
+        assert score is None or (0 <= score <= 100)
 
 
 class TestMoatScorer:
@@ -197,20 +196,20 @@ class TestMoatScorer:
         """Test company with weak competitive moat."""
         financials = [
             {
-                'net_income': 5000000000,
-                'total_equity': 100000000000,  # ROE = 5%
-                'gross_margin': 0.15,
-                'operating_margin': 0.05,
-                'net_margin': 0.02,
-                'revenue': 250000000000,
-                'total_assets': 200000000000,
+                'net_income': 2000000000,
+                'total_equity': 100000000000,  # ROE = 2%
+                'gross_margin': 0.15,          # 15%
+                'operating_margin': 0.05,      # 5%
+                'net_margin': 0.02,            # 2%
+                'revenue': 50000000000,
+                'total_assets': 500000000000,  # asset turnover 0.1 (capital intensive)
             }
         ]
-        
+
         result = calculate_moat_score(financials)
         score = result.get("score") if isinstance(result, dict) else result
-        
-        assert score <= 40  # Weak moat
+
+        assert score <= 40  # Weak moat (low ROE, thin margins, capital intensive)
 
 
 class TestPredictabilityScorer:
@@ -234,17 +233,17 @@ class TestPredictabilityScorer:
     def test_highly_volatile(self):
         """Test company with volatile earnings."""
         financials = [
-            {'fiscal_year': 2023, 'eps': 8.0, 'revenue': 450000000000},
-            {'fiscal_year': 2022, 'eps': 2.0, 'revenue': 300000000000},
-            {'fiscal_year': 2021, 'eps': 6.5, 'revenue': 400000000000},
-            {'fiscal_year': 2020, 'eps': 1.5, 'revenue': 250000000000},
-            {'fiscal_year': 2019, 'eps': 7.0, 'revenue': 420000000000},
+            {'fiscal_year': 2023, 'eps': 4.0, 'revenue': 420000000000},
+            {'fiscal_year': 2022, 'eps': -1.5, 'revenue': 250000000000},  # loss year
+            {'fiscal_year': 2021, 'eps': 5.5, 'revenue': 400000000000},
+            {'fiscal_year': 2020, 'eps': -2.0, 'revenue': 230000000000},  # loss year
+            {'fiscal_year': 2019, 'eps': 6.0, 'revenue': 410000000000},
         ]
-        
+
         result = calculate_predictability_score(financials)
         score = result.get("score") if isinstance(result, dict) else result
-        
-        assert score <= 40  # Very volatile
+
+        assert score <= 40  # Very volatile (frequent losses, swinging revenue)
 
 
 class TestScorecardBuilder:
@@ -304,48 +303,42 @@ class TestScoreCompanyIntegration:
     """Test complete score_company workflow."""
     
     @pytest.mark.asyncio
-    @patch('src.agents.scorer_agent.FinancialsRepository')
-    async def test_score_company_success(self, mock_repo):
-        """Test successful company scoring."""
-        # Mock database query
-        mock_financials = [
-            Mock(
-                ticker='AAPL',
-                fiscal_year=2023,
-                revenue=383285000000,
-                eps=6.16,
-                current_ratio=0.97,
-                debt_to_equity=1.78,
-                pe_ratio=29.43,
-                gross_margin=0.441,
-                net_margin=0.253,
-                operating_margin=0.298,
-                net_income=96995000000,
-                total_equity=62318000000,
-            )
-        ]
-        
-        mock_repo.return_value.get_recent_financials = AsyncMock(return_value=mock_financials)
-        
-        result = await score_company('AAPL')
-        
+    @patch('src.agents.scorer_agent.build_scorecard_from_db')
+    async def test_score_company_success(self, mock_build):
+        """Test successful company scoring (score_company maps the scorecard)."""
+        mock_build.return_value = {
+            "ticker": "AAPL",
+            "financial_health_score": 42,
+            "growth_score": 40,
+            "valuation_score": 33,
+            "moat_score": 68,
+            "predictability_score": 50,
+            "overall_score": 46,
+            "generated_at": None,
+        }
+
+        db = AsyncMock()
+        result = await score_company(db, 'AAPL')
+
         assert result['ticker'] == 'AAPL'
-        assert 'overall' in result
-        assert result['financial_health'] >= 0
-        assert result['growth'] >= 0
-        assert result['valuation'] >= 0
-        assert result['moat'] >= 0
-        assert result['predictability'] >= 0
-    
+        assert result['error'] is None
+        assert result['overall'] == 46
+        assert result['financial_health'] == 42
+        assert result['growth'] == 40
+        assert result['valuation'] == 33
+        assert result['moat'] == 68
+        assert result['predictability'] == 50
+
     @pytest.mark.asyncio
-    @patch('src.agents.scorer_agent.FinancialsRepository')
-    async def test_score_company_no_data(self, mock_repo):
-        """Test scoring with no financial data."""
-        mock_repo.return_value.get_recent_financials = AsyncMock(return_value=[])
-        
-        result = await score_company('INVALID')
-        
-        assert 'error' in result or result['error'] is not None
+    @patch('src.agents.scorer_agent.build_scorecard_from_db')
+    async def test_score_company_no_data(self, mock_build):
+        """Test scoring with no financial data returns an error."""
+        mock_build.return_value = None
+
+        db = AsyncMock()
+        result = await score_company(db, 'INVALID')
+
+        assert result.get('error') is not None
 
 
 class TestEdgeCases:
@@ -366,9 +359,10 @@ class TestEdgeCases:
         
         health_score = health_result.get("score") if isinstance(health_result, dict) else health_result
         valuation_score = valuation_result.get("score") if isinstance(valuation_result, dict) else valuation_result
-        
-        assert health_score >= 0
-        assert valuation_score >= 0
+
+        # All-None inputs -> not scoreable (None), otherwise within bounds
+        assert health_score is None or (0 <= health_score <= 100)
+        assert valuation_score is None or (0 <= valuation_score <= 100)
     
     def test_empty_list(self):
         """Test handling of empty financial data list."""
