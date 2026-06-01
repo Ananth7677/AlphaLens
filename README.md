@@ -216,7 +216,7 @@ All endpoints are served under the `/api/v1` prefix. Access is currently open
 | `POST` | `/analyze/{ticker}` | Full orchestrated analysis (financial + scoring + red flags + news) |
 | `GET`  | `/financials/{ticker}` | Stored financial data for a ticker |
 | `GET`  | `/scorecard/{ticker}` | Investment scores for a ticker |
-| `POST` | `/ask/{ticker}` | Ask an AI question about a specific stock |
+| `POST` | `/ask/{ticker}` | Ask an AI question about a specific stock (grounded in scores, red flags, news, and — when filings are ingested — retrieved SEC filing excerpts with citations) |
 | `POST` | `/ask` | Ask a general investment question |
 | `GET`  | `/health` | Overall system health |
 | `GET`  | `/health/quick` | Fast liveness check |
@@ -390,7 +390,7 @@ AlphaLens/
 | LangGraph orchestration | ✅ Complete | Sequential → parallel → report |
 | FastAPI backend | ✅ Complete | Analysis, scorecard, Q&A, and health endpoints |
 | RAG ingestion (scrape/chunk/embed) | ✅ Complete | Section-aware chunking, rate-limited Gemini embeddings |
-| RAG retrieval / grading | 🟡 Implemented, not wired in | `retriever.py` and `grader.py` exist but are not yet integrated into the API/orchestration |
+| RAG retrieval / grading | ✅ Wired into `/ask` | Agentic retrieve → grade → answer; the `/ask/{ticker}` endpoint grounds answers in retrieved filing excerpts with citations. Not yet added to the LangGraph workflow. |
 | Authentication | ⏳ Planned | Endpoints are currently open access |
 | Web dashboard / deployment | ⏳ Planned | — |
 
@@ -455,7 +455,8 @@ conda run -n StablePythonEnv python tests/orchestration/test_orchestration_manua
 
 ## 🗺️ Roadmap
 
-- [ ] Wire the RAG retriever + grader into the `/ask` flow with citations
+- [x] Wire the RAG retriever + grader into the `/ask` flow with citations
+- [ ] Add a RAG node to the LangGraph workflow (populate the `rag_*` state fields)
 - [ ] API key authentication and per-key rate limiting
 - [ ] Peer comparison and historical trend analysis
 - [ ] Web dashboard (React/Next.js)

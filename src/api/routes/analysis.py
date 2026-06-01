@@ -292,8 +292,8 @@ async def ask_question_about_stock(
         
         print(f"🤔 Processing question for {ticker}: {question}")
         
-        # Gather context from available data sources
-        context = await _gather_analysis_context(db, ticker, request.include_recent_analysis)
+        # Gather context from available data sources (incl. SEC filing retrieval)
+        context = await _gather_analysis_context(db, ticker, question, request.include_recent_analysis)
         
         # Generate AI response using available data
         answer, confidence, sources = await _generate_answer(ticker, question, context)
@@ -514,8 +514,67 @@ def _transform_analysis_result(result: Dict[str, Any], execution_time: float) ->
     return response
 
 
-async def _gather_analysis_context(db, ticker: str, include_recent: bool) -> Dict[str, Any]:
-    """Gather available analysis data for context."""
+def _format_citation(chunk: Dict[str, Any]) -> str:
+    """Build a human-readable citation from a retrieved SEC chunk."""
+    filing_type = chunk.get("filing_type") or "Filing"
+    section = chunk.get("section") or "General"
+    year = chunk.get("fiscal_year")
+    year_str = f" FY{year}" if year else ""
+    return f"{filing_type}{year_str} · {section}"
+
+
+async def _retrieve_sec_insights(
+    db, ticker: str, question: str, top_k: int = 4
+) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve and grade relevant SEC filing chunks for the question (agentic RAG).
+
+    Returns None when the company has no ingested filings or retrieval fails — SEC
+    grounding is an enrichment layer and must never break the /ask endpoint. The
+    chunk_count guard avoids the embedding + grading API calls when nothing is ingested.
+    """
+    try:
+        from src.dbo.repositories.sec_repo import chunk_count
+        from src.agents.rag_agent import query_filings
+
+        available = await chunk_count(db, ticker)
+        if not available:
+            print(f"📄 No SEC chunks ingested for {ticker}, skipping filing retrieval")
+            return None
+
+        rag = await query_filings(db, ticker, question, top_k=top_k)
+        chunks = rag.get("chunks") or []
+        if not chunks:
+            return None
+
+        excerpts = []
+        for chunk in chunks[:3]:
+            text = (chunk.get("content") or "").strip()
+            if len(text) > 400:
+                text = text[:400].rstrip() + "…"
+            excerpts.append({"citation": _format_citation(chunk), "text": text})
+
+        citations: list[str] = []
+        for chunk in chunks:
+            citation = _format_citation(chunk)
+            if citation not in citations:
+                citations.append(citation)
+
+        return {
+            "relevance_score": rag.get("relevance_score", 0.0),
+            "low_confidence": rag.get("low_confidence", True),
+            "query_used": rag.get("query_used", question),
+            "total_chunks": len(chunks),
+            "excerpts": excerpts,
+            "citations": citations,
+        }
+    except Exception as e:
+        print(f"⚠️ SEC filing retrieval failed for {ticker}: {e}")
+        return None
+
+
+async def _gather_analysis_context(db, ticker: str, question: str, include_recent: bool) -> Dict[str, Any]:
+    """Gather available analysis data for context (financials, scores, red flags, news, SEC filings)."""
     context = {"ticker": ticker}
     print(f"🔍 Gathering context for {ticker}, include_recent={include_recent}")
     
@@ -596,7 +655,17 @@ async def _gather_analysis_context(db, ticker: str, include_recent: bool) -> Dic
             except Exception as e:
                 print(f"⚠️ News analysis failed: {e}")
                 pass  # News analysis is optional
-                
+
+            # Retrieve + grade relevant SEC filing chunks (agentic RAG)
+            sec_insights = await _retrieve_sec_insights(db, ticker, question)
+            if sec_insights:
+                context["sec_insights"] = sec_insights
+                print(
+                    f"📄 SEC insights: {sec_insights['total_chunks']} chunks, "
+                    f"relevance={sec_insights['relevance_score']:.2f}, "
+                    f"low_confidence={sec_insights['low_confidence']}"
+                )
+
         except Exception as e:
             print(f"⚠️ Error gathering context for {ticker}: {e}")
             import traceback
@@ -899,15 +968,28 @@ async def _generate_answer(ticker: str, question: str, context: Dict[str, Any]) 
         For comprehensive future analysis, run the full /analyze endpoint for detailed projections.
         """)
     
+    # Ground the answer in SEC filing text when relevant context was retrieved
+    sec = context.get("sec_insights")
+    if sec and not sec.get("low_confidence") and sec.get("excerpts"):
+        print(f"📄 Including {len(sec['excerpts'])} SEC filing excerpt(s) in answer")
+        answer_parts.append("\n**From SEC Filings:**")
+        for excerpt in sec["excerpts"]:
+            answer_parts.append(f"- _{excerpt['citation']}_: {excerpt['text']}")
+        sources.append("SEC Filings")
+
     # Default response if no specific context found
     if not answer_parts:
         answer_parts.append(f"I need more specific analysis data for {ticker} to answer your question comprehensively.")
         answer_parts.append("Please run a full analysis first using the /analyze endpoint.")
-    
+
     # Combine answer
     answer = " ".join(answer_parts)
-    confidence = 0.8 if sources else 0.3
-    
+    if "SEC Filings" in sources:
+        # Answers grounded in primary-source filings warrant higher confidence
+        confidence = 0.85
+    else:
+        confidence = 0.8 if sources else 0.3
+
     return answer, confidence, sources
 
 
