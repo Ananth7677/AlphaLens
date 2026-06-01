@@ -221,16 +221,18 @@ async def news_node(state: AnalysisState) -> Dict[str, Any]:
                 "news_error": result["error"],
                 "errors": [f"News: {result['error']}"]
             }
-        
+
+        # Defensive: tolerate partial sentiment summaries (missing keys default to 0)
+        summary = result.get("sentiment_summary") or {}
         return {
             "news_sentiment": {
-                "total_articles": result["sentiment_summary"]["total"],
-                "positive": result["sentiment_summary"]["positive"],
-                "neutral": result["sentiment_summary"]["neutral"],
-                "negative": result["sentiment_summary"]["negative"],
-                "average_score": result["sentiment_summary"]["average_score"],
-                "positive_pct": result["sentiment_summary"].get("positive_pct", 0),
-                "negative_pct": result["sentiment_summary"].get("negative_pct", 0)
+                "total_articles": summary.get("total", 0),
+                "positive": summary.get("positive", 0),
+                "neutral": summary.get("neutral", 0),
+                "negative": summary.get("negative", 0),
+                "average_score": summary.get("average_score", 0.0),
+                "positive_pct": summary.get("positive_pct", 0),
+                "negative_pct": summary.get("negative_pct", 0)
             },
             "news_error": None
         }
@@ -300,21 +302,23 @@ async def final_report_node(state: AnalysisState) -> Dict[str, Any]:
         score = scores["overall_score"]
         recommendation = scores["rating"]
         
-        # Calculate confidence based on data availability
+        # Calculate confidence based on data availability and risk signals.
+        # Base 0.7, +0.1 with news, -0.2 if any HIGH flags, -0.1 if any MEDIUM flags.
         confidence = 0.7  # Base confidence
-        
+
         # Increase confidence if we have news data
         if state.get("news_sentiment"):
             confidence += 0.1
-        
-        # Decrease confidence if high red flags
+
+        # Decrease confidence for red flags (high and medium penalties stack)
         if state.get("red_flags"):
             high_flags = state["red_flags"].get("high_severity", 0)
-            if high_flags > 2:
+            medium_flags = state["red_flags"].get("medium_severity", 0)
+            if high_flags > 0:
                 confidence -= 0.2
-            elif high_flags > 0:
+            if medium_flags > 0:
                 confidence -= 0.1
-        
+
         confidence = max(0.0, min(1.0, confidence))
     
     # Build summary
