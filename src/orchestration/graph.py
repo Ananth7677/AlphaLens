@@ -20,61 +20,74 @@ from .nodes import (
     scorer_node,
     red_flag_node,
     news_node,
+    sec_node,
     final_report_node
 )
 
 
-def create_analysis_graph() -> StateGraph:
+def create_analysis_graph(include_sec: bool = False) -> StateGraph:
     """
     Create and compile the LangGraph workflow.
-    
+
+    Args:
+        include_sec: When True, add a SEC filing analysis branch that runs in
+                     parallel with the scorer/red_flag/news agents.
+
     Returns:
         Compiled StateGraph ready for execution
     """
     # Initialize graph with state schema
     workflow = StateGraph(AnalysisState)
-    
+
     # Add nodes
     workflow.add_node("financial", financial_node)
     workflow.add_node("scorer", scorer_node)
     workflow.add_node("red_flag", red_flag_node)
     workflow.add_node("news", news_node)
     workflow.add_node("final_report", final_report_node)
-    
+
     # Define edges (execution order)
     # Start with financial agent
     workflow.set_entry_point("financial")
-    
+
     # After financial data, run scorer, red_flag, and news in parallel
     # (LangGraph will handle parallelization if configured)
     workflow.add_edge("financial", "scorer")
     workflow.add_edge("financial", "red_flag")
     workflow.add_edge("financial", "news")
-    
+
     # All three agents feed into final report
     workflow.add_edge("scorer", "final_report")
     workflow.add_edge("red_flag", "final_report")
     workflow.add_edge("news", "final_report")
-    
+
+    # Optional SEC filing analysis branch (parallel with the others)
+    if include_sec:
+        workflow.add_node("sec", sec_node)
+        workflow.add_edge("financial", "sec")
+        workflow.add_edge("sec", "final_report")
+
     # Final report is the end
     workflow.add_edge("final_report", END)
-    
+
     # Compile the graph
     return workflow.compile()
 
 
 async def run_analysis(
     ticker: str,
+    include_sec_analysis: bool = False,
     trace_metadata: Optional[Dict[str, Any]] = None,
     trace_tags: Optional[List[str]] = None,
     run_name: Optional[str] = None,
 ) -> dict:
     """
     Run complete stock analysis workflow for a ticker.
-    
+
     Args:
         ticker: Stock ticker symbol (e.g., "AAPL")
-    
+        include_sec_analysis: When True, also analyze already-ingested SEC filings.
+
     Returns:
         Final analysis state with all results
     """
@@ -101,7 +114,7 @@ async def run_analysis(
     }
     
     # Create and run graph
-    graph = create_analysis_graph()
+    graph = create_analysis_graph(include_sec=include_sec_analysis)
     
     try:
         # Execute workflow

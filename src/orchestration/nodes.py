@@ -243,6 +243,42 @@ async def news_node(state: AnalysisState) -> Dict[str, Any]:
         }
 
 
+async def sec_node(state: AnalysisState) -> Dict[str, Any]:
+    """
+    Analyze already-ingested SEC filings (optional, enabled via include_sec_analysis).
+
+    Reads and grades existing filing chunks — it does not scrape or embed. If the
+    ticker has no ingested filings, this records rag_error and the workflow continues.
+
+    Returns:
+        Updates to state with sec_insights or rag_error
+    """
+    ticker = state["ticker"]
+
+    try:
+        from src.dbo.database import get_session
+        from src.agents.rag_agent import analyze_filings
+
+        async for db in get_session():
+            result = await analyze_filings(db, ticker)
+
+            if result.get("error"):
+                return {
+                    "sec_insights": None,
+                    "rag_error": result["error"],
+                    "errors": [f"SEC: {result['error']}"]
+                }
+
+            return {"sec_insights": result, "rag_error": None}
+
+    except Exception as e:
+        return {
+            "sec_insights": None,
+            "rag_error": str(e),
+            "errors": [f"SEC: {str(e)}"]
+        }
+
+
 async def final_report_node(state: AnalysisState) -> Dict[str, Any]:
     """
     Generate final recommendation and summary.
@@ -330,6 +366,14 @@ async def final_report_node(state: AnalysisState) -> Dict[str, Any]:
         summary_parts.append(
             f"News Sentiment: {sentiment_label} "
             f"({news['positive']} positive, {news['negative']} negative out of {news['total_articles']} articles)"
+        )
+
+    # SEC filings summary (only when SEC analysis was run)
+    sec = state.get("sec_insights")
+    if sec and sec.get("total_chunks"):
+        summary_parts.append(
+            f"SEC Filings: {sec.get('filings_analyzed', 0)} analyzed "
+            f"({len(sec.get('risk_factors', []))} key risk factors surfaced)"
         )
     
     summary = " | ".join(summary_parts) if summary_parts else "Incomplete analysis"

@@ -182,6 +182,20 @@ class AsyncAnalysisResponse(BaseModel):
     result_url: str = Field(description="URL to retrieve results when complete")
 
 
+class AnalysisStatusResponse(BaseModel):
+    """Status of a background (async) analysis run."""
+    analysis_id: str = Field(description="Unique analysis ID")
+    status: str = Field(description="running | completed | failed")
+    ticker: str = Field(description="Stock ticker symbol")
+    started_at: datetime = Field(description="When the analysis started")
+    completed_at: Optional[datetime] = Field(None, description="When the analysis finished")
+    error: Optional[str] = Field(None, description="Error message if the analysis failed")
+    result_url: Optional[str] = Field(None, description="URL to fetch the result once completed")
+
+    class Config:
+        json_encoders = {datetime: lambda v: v.isoformat()}
+
+
 class QuestionRequest(BaseModel):
     """Request model for ticker-specific questions."""
     question: str = Field(

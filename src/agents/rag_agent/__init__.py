@@ -109,4 +109,58 @@ async def query_filings(
     return await retrieve_and_grade(db, ticker, query, top_k)
 
 
-__all__ = ["ingest_company", "query_filings"]
+def _excerpt(chunk: dict, max_len: int = 300) -> str:
+    """Format a retrieved chunk as a short, cited one-liner."""
+    filing_type = chunk.get("filing_type") or "Filing"
+    year = chunk.get("fiscal_year")
+    section = chunk.get("section") or "General"
+    year_str = f" FY{year}" if year else ""
+    text = (chunk.get("content") or "").strip().replace("\n", " ")
+    if len(text) > max_len:
+        text = text[:max_len].rstrip() + "…"
+    return f"[{filing_type}{year_str} · {section}] {text}"
+
+
+async def analyze_filings(db: AsyncSession, ticker: str, top_k: int = 4) -> dict:
+    """
+    Summarize a company's *already-ingested* SEC filings for orchestrated analysis.
+
+    Used by the LangGraph SEC node (the /analyze `include_sec_analysis` flag). This
+    only reads filings that have already been ingested — it does NOT scrape or embed
+    (that is the slow, quota-heavy `ingest_company` step, run offline). Returns an
+    error dict when nothing is ingested so the caller can skip gracefully.
+
+    Returns (on success):
+    {
+        "filings_analyzed": int,
+        "total_chunks":     int,
+        "key_insights":     [str, ...],   # cited MD&A / business excerpts
+        "risk_factors":     [str, ...],   # cited Risk Factors excerpts
+    }
+    """
+    total_chunks = await sec_repo.chunk_count(db, ticker)
+    if not total_chunks:
+        return {"error": f"No SEC filings ingested for {ticker}. Run ingestion first."}
+
+    completed = await sec_repo.get_complete_filings(db, ticker)
+
+    risks = await retrieve_and_grade(
+        db, ticker,
+        "What are the most significant risk factors and threats facing the company?",
+        top_k,
+    )
+    insights = await retrieve_and_grade(
+        db, ticker,
+        "What are the key business developments, revenue drivers, and financial highlights?",
+        top_k,
+    )
+
+    return {
+        "filings_analyzed": len(completed),
+        "total_chunks": total_chunks,
+        "key_insights": [_excerpt(c) for c in (insights.get("chunks") or [])[:top_k]],
+        "risk_factors": [_excerpt(c) for c in (risks.get("chunks") or [])[:top_k]],
+    }
+
+
+__all__ = ["ingest_company", "query_filings", "analyze_filings"]

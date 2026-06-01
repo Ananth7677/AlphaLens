@@ -213,20 +213,31 @@ All endpoints are served under the `/api/v1` prefix. Access is currently open
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/analyze/{ticker}` | Full orchestrated analysis (financial + scoring + red flags + news) |
-| `GET`  | `/financials/{ticker}` | Stored financial data for a ticker |
-| `GET`  | `/scorecard/{ticker}` | Investment scores for a ticker |
-| `POST` | `/ask/{ticker}` | Ask an AI question about a specific stock (grounded in scores, red flags, news, and — when filings are ingested — retrieved SEC filing excerpts with citations) |
-| `POST` | `/ask` | Ask a general investment question |
+| `POST` | `/analyze/{ticker}` | Full orchestrated analysis (financial + scoring + red flags + news; `?include_sec_analysis=true` adds SEC filing analysis, `?async_mode=true` runs in the background) |
+| `GET`  | `/analysis-status/{analysis_id}` | Poll the status of a background (async) analysis |
+| `GET`  | `/analysis-result/{analysis_id}` | Fetch a completed background analysis result |
+| `GET`  | `/financials/{ticker}` | **Read** the latest stored financial data (no external fetch) |
+| `GET`  | `/scorecard/{ticker}` | **Read** the latest stored investment scores (no recompute) |
+| `POST` | `/ask/{ticker}` | Ask an AI question about a stock — Gemini-generated, grounded in scores, red flags, news, and (when filings are ingested) cited SEC filing excerpts |
+| `POST` | `/ask` | Ask a general investment question (Gemini-generated) |
 | `GET`  | `/health` | Overall system health |
 | `GET`  | `/health/quick` | Fast liveness check |
 | `GET`  | `/health/database` | Database connectivity |
 | `GET`  | `/health/apis` | External API status (Yahoo, FMP, Gemini) |
 
+> `/financials` and `/scorecard` are read-only and return stored data — run
+> `POST /analyze/{ticker}` first to populate or refresh it. Q&A endpoints fall back
+> to deterministic templated answers when no Gemini key is configured.
+
 **Example:**
 ```bash
-# Full analysis
-curl -X POST "http://localhost:8000/api/v1/analyze/AAPL"
+# Full analysis (with SEC filing analysis, if filings are ingested)
+curl -X POST "http://localhost:8000/api/v1/analyze/AAPL?include_sec_analysis=true"
+
+# Background analysis, then poll + fetch
+curl -X POST "http://localhost:8000/api/v1/analyze/AAPL?async_mode=true"
+curl "http://localhost:8000/api/v1/analysis-status/<analysis_id>"
+curl "http://localhost:8000/api/v1/analysis-result/<analysis_id>"
 
 # Ask a question about a stock
 curl -X POST "http://localhost:8000/api/v1/ask/AAPL" \
@@ -240,12 +251,16 @@ curl -X POST "http://localhost:8000/api/v1/ask/AAPL" \
 
 AlphaLens coordinates agents through a LangGraph `StateGraph`. The Financial Agent
 runs first (it is a data dependency); the Scorer, Red Flag, and News agents then run
-in parallel; finally a report node aggregates results into a recommendation.
+in parallel; finally a report node aggregates results into a recommendation. When
+`include_sec_analysis=true`, a SEC filing-analysis node joins the parallel branch
+(it reads already-ingested filings; it does not scrape/embed).
 
 ```
-START → Financial Agent ─┬─→ Scorer Agent ──┐
-                         ├─→ Red Flag Agent ─┼─→ Final Report → END
-                         └─→ News Agent ─────┘
+START → Financial Agent ─┬─→ Scorer Agent ───┐
+                         ├─→ Red Flag Agent ──┤
+                         ├─→ News Agent ───────┼─→ Final Report → END
+                         └─→ SEC Agent* ──────┘
+                            (*only if include_sec_analysis=true)
 ```
 
 ### Shared state
@@ -390,7 +405,9 @@ AlphaLens/
 | LangGraph orchestration | ✅ Complete | Sequential → parallel → report |
 | FastAPI backend | ✅ Complete | Analysis, scorecard, Q&A, and health endpoints |
 | RAG ingestion (scrape/chunk/embed) | ✅ Complete | Section-aware chunking, rate-limited Gemini embeddings |
-| RAG retrieval / grading | ✅ Wired into `/ask` | Agentic retrieve → grade → answer; the `/ask/{ticker}` endpoint grounds answers in retrieved filing excerpts with citations. Not yet added to the LangGraph workflow. |
+| RAG retrieval / grading | ✅ Wired in | Agentic retrieve → grade → answer. Used by `/ask/{ticker}` (cited excerpts) and by the optional SEC node in the `/analyze` workflow. Analyzes already-ingested filings; ingestion (`ingest_company`) remains an offline step. |
+| Q&A generation | ✅ LLM-backed | `/ask` and `/ask/{ticker}` use Gemini grounded in gathered context, with a deterministic templated fallback when no key is set. |
+| Async analysis | ✅ Functional | `?async_mode=true` + `/analysis-status` / `/analysis-result`. State is in-memory (single-process) — see Known Issues. |
 | Authentication | ⏳ Planned | Endpoints are currently open access |
 | Web dashboard / deployment | ⏳ Planned | — |
 
@@ -456,7 +473,8 @@ conda run -n StablePythonEnv python tests/orchestration/test_orchestration_manua
 ## 🗺️ Roadmap
 
 - [x] Wire the RAG retriever + grader into the `/ask` flow with citations
-- [ ] Add a RAG node to the LangGraph workflow (populate the `rag_*` state fields)
+- [x] Add a SEC/RAG node to the LangGraph workflow (`include_sec_analysis`)
+- [ ] Move background-analysis state to Redis/DB for multi-worker production
 - [ ] API key authentication and per-key rate limiting
 - [ ] Peer comparison and historical trend analysis
 - [ ] Web dashboard (React/Next.js)
@@ -472,6 +490,12 @@ conda run -n StablePythonEnv python tests/orchestration/test_orchestration_manua
    implemented to stay within the per-minute cap.
 2. **FMP v3 endpoints deprecated** for new users — resolved by migrating to `/stable`.
 3. **`google.generativeai` deprecated** — resolved by migrating to the `google-genai` client.
+4. **Background analysis state is in-memory** (a per-process dict), so `async_mode`
+   results are lost on restart and not shared across workers. Fine for single-process
+   dev; production needs Redis or a DB-backed store.
+5. **SEC analysis requires pre-ingested filings.** `include_sec_analysis` (and the
+   filing grounding in `/ask`) analyze filings already in pgvector; they do not trigger
+   ingestion. Run `ingest_company` offline first (it is slow and Gemini-quota bound).
 
 ---
 

@@ -7,20 +7,19 @@ Provides endpoints for comprehensive stock analysis using the multi-agent system
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query
 from fastapi.responses import JSONResponse
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union
 import asyncio
+import os
 import uuid
 from datetime import datetime, timezone
 
 from ..schemas.analysis import (
     AnalysisRequest, AnalysisResponse, QuestionRequest, QuestionResponse,
-    AsyncAnalysisResponse, FinancialData, InvestmentScores, RedFlagsSummary, NewsSentiment,
-    GeneralQuestionRequest, GeneralQuestionResponse, RedFlag, SECInsights
+    AsyncAnalysisResponse, AnalysisStatusResponse, FinancialData, InvestmentScores,
+    RedFlagsSummary, NewsSentiment, GeneralQuestionRequest, GeneralQuestionResponse,
+    RedFlag, SECInsights
 )
 from src.orchestration import run_analysis
-from src.agents.financial_agent import fetch_and_store_financials
-from src.agents.scorer_agent import score_company
-from src.agents.red_flag_agent import detect_red_flags
 from src.agents.news_agent import analyze_news
 from src.dbo.database import get_session
 
@@ -41,15 +40,15 @@ async def get_db_session():
             raise e
 
 
-@router.post("/analyze/{ticker}", response_model=AnalysisResponse)
+@router.post("/analyze/{ticker}", response_model=Union[AnalysisResponse, AsyncAnalysisResponse])
 async def analyze_stock(
     ticker: str,
     background_tasks: BackgroundTasks,
-    include_sec_analysis: bool = Query(default=False, description="Include SEC filing analysis"),
+    include_sec_analysis: bool = Query(default=False, description="Include SEC filing analysis (requires ingested filings)"),
     days_back_news: int = Query(default=7, ge=1, le=30, description="Days back for news"),
     max_articles: int = Query(default=20, ge=1, le=50, description="Max news articles"),
     async_mode: bool = Query(default=False, description="Run analysis in background")
-) -> AnalysisResponse:
+) -> Union[AnalysisResponse, AsyncAnalysisResponse]:
     """
     **Run Complete Stock Analysis**
     
@@ -118,6 +117,7 @@ async def analyze_stock(
             # Run complete orchestrated analysis
             result = await run_analysis(
                 ticker,
+                include_sec_analysis=include_sec_analysis,
                 run_name=f"API Analyze {ticker}",
                 trace_tags=["api", "sync"],
                 trace_metadata={
@@ -182,46 +182,94 @@ async def analyze_stock(
         )
 
 
+@router.get("/analysis-status/{analysis_id}", response_model=AnalysisStatusResponse)
+async def get_analysis_status(analysis_id: str) -> AnalysisStatusResponse:
+    """
+    **Check Background Analysis Status**
+
+    Poll this with the `analysis_id` returned by `POST /analyze/{ticker}?async_mode=true`.
+    """
+    record = background_analyses.get(analysis_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Unknown analysis_id: {analysis_id}")
+
+    status = record["status"]
+    return AnalysisStatusResponse(
+        analysis_id=analysis_id,
+        status=status,
+        ticker=record["ticker"],
+        started_at=record["started_at"],
+        completed_at=record.get("completed_at"),
+        error=record.get("error"),
+        result_url=f"/api/v1/analysis-result/{analysis_id}" if status == "completed" else None,
+    )
+
+
+@router.get("/analysis-result/{analysis_id}", response_model=AnalysisResponse)
+async def get_analysis_result(analysis_id: str) -> AnalysisResponse:
+    """
+    **Retrieve Background Analysis Result**
+
+    Returns the completed analysis. Responds 409 while still running and 404/500
+    for unknown or failed runs.
+    """
+    record = background_analyses.get(analysis_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Unknown analysis_id: {analysis_id}")
+
+    status = record["status"]
+    if status == "running":
+        raise HTTPException(status_code=409, detail="Analysis still running; poll /analysis-status first")
+    if status == "failed":
+        raise HTTPException(status_code=500, detail=record.get("error", "Analysis failed"))
+
+    result = record.get("result")
+    if result is None:
+        raise HTTPException(status_code=500, detail="Analysis completed but no result was stored")
+    return result
+
+
 @router.get("/financials/{ticker}", response_model=FinancialData)
 async def get_financial_data(
     ticker: str,
     db: Any = Depends(get_db_session)
 ) -> FinancialData:
     """
-    **Get Financial Data Only**
-    
-    Fetches financial metrics from Yahoo Finance and FMP without full analysis.
-    Useful for quick financial data retrieval.
+    **Get Stored Financial Data**
+
+    Returns the most recent financial metrics already stored for the ticker.
+    Run `POST /analyze/{ticker}` (or it runs automatically there) to populate/refresh
+    the data first. This is a read-only endpoint and does not fetch from external APIs.
     """
     try:
         ticker = ticker.strip().upper()
-        
-        # Fetch financial data directly
-        result = await fetch_and_store_financials(db, ticker)
-        
-        if result.get("error"):
-            raise HTTPException(status_code=404, detail=f"Financial data not found: {result['error']}")
-        
-        # Extract financial metrics
-        financial_data = result.get("financial_data", {})
-        
+
+        from src.dbo.repositories.financials_repo import get_latest as get_latest_financials
+
+        record = await get_latest_financials(db, ticker)
+        if not record:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No stored financial data for {ticker}. Run POST /analyze/{ticker} first."
+            )
+
         return FinancialData(
-            revenue=financial_data.get("revenue"),
-            revenue_growth_yoy=financial_data.get("revenue_growth_yoy"),
-            net_income=financial_data.get("net_income"),
-            eps=financial_data.get("eps"),
-            pe_ratio=financial_data.get("pe_ratio"),
-            market_cap=financial_data.get("market_cap"),
-            debt_to_equity=financial_data.get("debt_to_equity"),
-            current_ratio=financial_data.get("current_ratio"),
-            free_cash_flow=financial_data.get("free_cash_flow"),
-            source=financial_data.get("source", "YAHOO_FMP")
+            revenue=record.revenue,
+            revenue_growth_yoy=record.revenue_growth_yoy,
+            net_income=record.net_income,
+            eps=record.eps,
+            pe_ratio=record.pe_ratio,
+            market_cap=record.market_cap,
+            debt_to_equity=record.debt_to_equity,
+            current_ratio=record.current_ratio,
+            free_cash_flow=record.free_cash_flow,
+            source=record.source,
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch financial data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to read financial data: {str(e)}")
 
 
 @router.get("/scorecard/{ticker}", response_model=InvestmentScores)
@@ -230,38 +278,44 @@ async def get_investment_scores(
     db: Any = Depends(get_db_session)
 ) -> InvestmentScores:
     """
-    **Get Investment Scores**
-    
-    Returns 5-dimensional investment scoring breakdown:
-    - Financial Health (0-100)
-    - Growth (0-100) 
-    - Valuation (0-100)
-    - Moat (0-100)
-    - Predictability (0-100)
+    **Get Stored Investment Scores**
+
+    Returns the most recent 5-dimensional scoring breakdown stored for the ticker
+    (financial health, growth, valuation, moat, predictability). Read-only — run
+    `POST /analyze/{ticker}` to compute/refresh scores first.
     """
     try:
         ticker = ticker.strip().upper()
-        
-        # Get investment scores
-        result = await score_company(db, ticker)
-        
-        if result.get("error"):
-            raise HTTPException(status_code=404, detail=f"Scoring failed: {result['error']}")
-        
+
+        from src.dbo.repositories.scorecard_repo import get_latest as get_latest_scorecard
+
+        record = await get_latest_scorecard(db, ticker)
+        if not record:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No stored scorecard for {ticker}. Run POST /analyze/{ticker} first."
+            )
+
+        # Normalize stored recommendation (e.g. "STRONG_BUY") to the response enum ("STRONG BUY")
+        rating = (record.recommendation or "HOLD").replace("_", " ").upper()
+        valid_ratings = {"STRONG BUY", "BUY", "HOLD", "SELL", "STRONG SELL"}
+        if rating not in valid_ratings:
+            rating = "HOLD"
+
         return InvestmentScores(
-            overall_score=result["overall"],
-            rating=result["rating"],
-            financial_health=result["financial_health"],
-            growth=result["growth"],
-            valuation=result["valuation"],
-            moat=result["moat"],
-            predictability=result["predictability"]
+            overall_score=record.overall_score or 0,
+            rating=rating,
+            financial_health=record.financial_health_score or 0,
+            growth=record.growth_score or 0,
+            valuation=record.valuation_score or 0,
+            moat=record.moat_score or 0,
+            predictability=record.predictability_score or 0,
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Scoring failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to read scorecard: {str(e)}")
 
 
 @router.post("/ask/{ticker}", response_model=QuestionResponse)
@@ -361,10 +415,12 @@ async def run_background_analysis(
     try:
         # Update status
         background_analyses[analysis_id]["status"] = "running"
-        
+        start_time = background_analyses[analysis_id].get("started_at", datetime.now(timezone.utc))
+
         # Run analysis
         result = await run_analysis(
             ticker,
+            include_sec_analysis=include_sec_analysis,
             run_name=f"API Background Analyze {ticker}",
             trace_tags=["api", "background"],
             trace_metadata={
@@ -376,14 +432,18 @@ async def run_background_analysis(
                 "max_articles": max_articles,
             },
         )
-        
-        # Store result
+
+        # Transform to the same API response shape returned by the sync path
+        completed_at = datetime.now(timezone.utc)
+        execution_time = (completed_at - start_time).total_seconds()
+        response = _transform_analysis_result(result, execution_time)
+
         background_analyses[analysis_id].update({
             "status": "completed",
-            "completed_at": datetime.now(timezone.utc),
-            "result": result
+            "completed_at": completed_at,
+            "result": response,
         })
-        
+
     except Exception as e:
         background_analyses[analysis_id].update({
             "status": "failed",
@@ -512,6 +572,90 @@ def _transform_analysis_result(result: Dict[str, Any], execution_time: float) ->
     response.errors = errors
     
     return response
+
+
+_GENAI_CLIENT = None
+
+
+def _get_genai_client():
+    """Lazily create a shared Gemini client (avoids import-time failures)."""
+    global _GENAI_CLIENT
+    if _GENAI_CLIENT is None:
+        from google import genai
+        _GENAI_CLIENT = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+    return _GENAI_CLIENT
+
+
+async def _llm_generate(prompt: str, model: str = "gemini-2.0-flash") -> Optional[str]:
+    """
+    Generate text with Gemini. Returns None (so callers fall back to templated
+    answers) when no API key is configured or the call fails.
+    """
+    if not os.getenv("GEMINI_API_KEY"):
+        return None
+    try:
+        client = _get_genai_client()
+        response = await asyncio.to_thread(
+            client.models.generate_content, model=model, contents=prompt
+        )
+        text = (getattr(response, "text", None) or "").strip()
+        return text or None
+    except Exception as e:
+        print(f"⚠️ Gemini generation failed: {e}")
+        return None
+
+
+def _context_sources(context: Dict[str, Any]) -> list[str]:
+    """Derive the list of data sources present in the gathered context."""
+    sources: list[str] = []
+    if context.get("financial_data"):
+        sources.append("Financial Data")
+    if context.get("scores"):
+        sources.append("Investment Scoring")
+    if context.get("red_flags"):
+        sources.append("Red Flag Analysis")
+    if context.get("news_sentiment"):
+        sources.append("News Sentiment Analysis")
+    sec = context.get("sec_insights")
+    if sec and not sec.get("low_confidence") and sec.get("excerpts"):
+        sources.append("SEC Filings")
+    return sources
+
+
+def _format_context_for_llm(context: Dict[str, Any]) -> str:
+    """Render the gathered context into a compact, LLM-friendly text block."""
+    parts: list[str] = []
+
+    fd = context.get("financial_data")
+    if fd:
+        parts.append("Financials: " + ", ".join(f"{k}={v}" for k, v in fd.items() if v is not None))
+
+    scores = context.get("scores")
+    if scores:
+        parts.append("Scores (0-100): " + ", ".join(f"{k}={v}" for k, v in scores.items() if v is not None))
+
+    rf = context.get("red_flags")
+    if rf and rf.get("total_flags"):
+        flag_text = "; ".join(
+            f"[{f.get('severity')}] {f.get('flag_type')}: {f.get('description')}"
+            for f in rf.get("flags", [])[:5]
+        )
+        parts.append(f"Red flags ({rf['total_flags']} total): {flag_text}")
+
+    news = context.get("news_sentiment")
+    if news and news.get("total_articles"):
+        parts.append(
+            f"News sentiment: {news['total_articles']} articles, "
+            f"avg score {news.get('average_score', 0)}, "
+            f"{news.get('positive', 0)} positive / {news.get('negative', 0)} negative"
+        )
+
+    sec = context.get("sec_insights")
+    if sec and sec.get("excerpts"):
+        excerpt_text = "\n".join(f"  - {e['citation']}: {e['text']}" for e in sec["excerpts"])
+        parts.append("SEC filing excerpts:\n" + excerpt_text)
+
+    return "\n".join(parts) if parts else "(No stored analysis data available for this ticker.)"
 
 
 def _format_citation(chunk: Dict[str, Any]) -> str:
@@ -677,14 +821,36 @@ async def _gather_analysis_context(db, ticker: str, question: str, include_recen
 
 
 async def _generate_answer(ticker: str, question: str, context: Dict[str, Any]) -> tuple[str, float, list[str]]:
-    """Generate AI answer based on available context."""
-    
-    # For now, provide a structured response based on available data
-    # Future: Integrate with Gemini for actual AI responses
-    
+    """
+    Generate an answer for a ticker-specific question.
+
+    Primary path: Gemini generation grounded in the gathered context (financials,
+    scores, red flags, news, SEC filing excerpts). Falls back to a deterministic
+    templated answer when no Gemini key is configured or the call fails.
+    """
+    # Primary path: real LLM generation grounded in the gathered data
+    sources = _context_sources(context)
+    context_block = _format_context_for_llm(context)
+    prompt = (
+        f"You are AlphaLens, an investment analysis assistant. Answer the user's question "
+        f"about {ticker} using ONLY the data provided below. Be concise and specific. When you "
+        f"use a SEC filing excerpt, cite it inline (e.g. [10-K FY2023 · Risk Factors]). If the "
+        f"data is insufficient to answer, say so and suggest running a full analysis via the "
+        f"/analyze endpoint. Do not give personalized financial advice.\n\n"
+        f"Question: {question}\n\n"
+        f"=== Available data for {ticker} ===\n{context_block}"
+    )
+    llm_answer = await _llm_generate(prompt)
+    if llm_answer:
+        print(f"🧠 Gemini answer generated for {ticker} ({len(sources)} data sources)")
+        confidence = 0.85 if "SEC Filings" in sources else (0.8 if sources else 0.5)
+        return llm_answer, confidence, sources
+
+    # Fallback path: deterministic templated answer (no LLM available)
+    print("⚠️ LLM generation unavailable, using templated answer")
     sources = []
     answer_parts = []
-    
+
     print(f"🧠 Generating answer for: '{question}'")
     print(f"🔍 Available context keys: {list(context.keys())}")
     
@@ -994,10 +1160,10 @@ async def _generate_answer(ticker: str, question: str, context: Dict[str, Any]) 
 
 
 async def _generate_general_answer(question: str) -> tuple[str, float, str]:
-    """Generate AI answer for general investment questions."""
-    
+    """Generate an answer for general (non-ticker) investment questions."""
+
     question_lower = question.lower()
-    
+
     # Categorize the question
     if any(word in question_lower for word in ["analyze", "analysis", "evaluate", "assess"]):
         category = "analysis"
@@ -1005,7 +1171,20 @@ async def _generate_general_answer(question: str) -> tuple[str, float, str]:
         category = "market"
     else:
         category = "general"
-    
+
+    # Primary path: real LLM generation
+    prompt = (
+        "You are AlphaLens, an investment education assistant. Answer this general investing "
+        "question clearly and concisely for a retail investor. Explain concepts and frameworks; "
+        "do not give personalized financial advice or specific buy/sell recommendations.\n\n"
+        f"Question: {question}"
+    )
+    llm_answer = await _llm_generate(prompt)
+    if llm_answer:
+        return llm_answer, 0.8, category
+
+    # Fallback path: deterministic templated answer
+
     # Provide structured responses based on question intent
     if "analyze" in question_lower or "evaluation" in question_lower:
         answer = """
