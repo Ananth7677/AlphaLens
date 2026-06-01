@@ -1,0 +1,328 @@
+{
+  "name": "AlphaLens Benchmark Eval",
+  "description": "Deterministic benchmark cases for AlphaLens orchestration correctness.",
+  "cases": [
+    {
+      "id": "aapl_bullish",
+      "ticker": "AAPL",
+      "financial_data": {
+        "ticker": "AAPL",
+        "revenue": 383285000000,
+        "revenue_growth_yoy": 0.028,
+        "net_income": 96995000000,
+        "eps": 6.16,
+        "pe_ratio": 29.43,
+        "market_cap": 2870000000000,
+        "debt_to_equity": 1.78,
+        "current_ratio": 0.97,
+        "free_cash_flow": 99584000000,
+        "source": "YAHOO_FMP"
+      },
+      "scores": {
+        "financial_health": 88,
+        "growth": 84,
+        "valuation": 72,
+        "moat": 86,
+        "predictability": 80,
+        "overall": 83
+      },
+      "red_flags": {
+        "total_flags": 0,
+        "high_severity": 0,
+        "medium_severity": 0,
+        "low_severity": 0,
+        "categories": {}
+      },
+      "news_sentiment": {
+        "sentiment_summary": {
+          "total": 5,
+          "positive": 4,
+          "neutral": 1,
+          "negative": 0,
+          "average_score": 0.42,
+          "positive_pct": 80.0,
+          "negative_pct": 0.0
+        },
+        "articles": [
+          {
+            "title": "Apple reports stronger-than-expected results"
+          }
+        ]
+      },
+      "expected": {
+        "workflow_status": "completed",
+        "recommendation": "STRONG BUY",
+        "confidence": 0.8,
+        "scores": {
+          "overall_score": 83,
+          "rating": "STRONG BUY",
+          "financial_health": 88,
+          "growth": 84,
+          "valuation": 72,
+          "moat": 86,
+          "predictability": 80
+        },
+        "red_flags": {
+          "total_flags": 0,
+          "high_severity": 0,
+          "medium_severity": 0,
+          "low_severity": 0
+        },
+        "news_sentiment": {
+          "total_articles": 5,
+          "positive": 4,
+          "neutral": 1,
+          "negative": 0,
+          "average_score": 0.42,
+          "positive_pct": 80.0,
+          "negative_pct": 0.0
+        }
+      }
+    },
+    {
+      "id": "msft_strong_buy",
+      "ticker": "MSFT",
+      "financial_data": {
+        "ticker": "MSFT",
+        "revenue": 245122000000,
+        "revenue_growth_yoy": 0.157,
+        "net_income": 88136000000,
+        "eps": 11.86,
+        "pe_ratio": 34.20,
+        "market_cap": 3110000000000,
+        "debt_to_equity": 0.42,
+        "current_ratio": 1.77,
+        "free_cash_flow": 72340000000,
+        "source": "YAHOO_FMP"
+      },
+      "scores": {
+        "financial_health": 92,
+        "growth": 90,
+        "valuation": 78,
+        "moat": 94,
+        "predictability": 88,
+        "overall": 91
+      },
+      "red_flags": {
+        "total_flags": 0,
+        "high_severity": 0,
+        "medium_severity": 0,
+        "low_severity": 0,
+        "categories": {}
+      },
+      "news_sentiment": {
+        "sentiment_summary": {
+          "total": 4,
+          "positive": 3,
+          "neutral": 1,
+          "negative": 0,
+          "average_score": 0.48,
+          "positive_pct": 75.0,
+          "negative_pct": 0.0
+        },
+        "articles": [
+          {
+            "title": "Microsoft expands cloud and AI growth"
+          }
+        ]
+      },
+      "expected": {
+        "workflow_status": "completed",
+        "recommendation": "STRONG BUY",
+        "confidence": 0.8,
+        "scores": {
+          "overall_score": 91,
+          "rating": "STRONG BUY",
+          "financial_health": 92,
+          "growth": 90,
+          "valuation": 78,
+          "moat": 94,
+          "predictability": 88
+        },
+        "red_flags": {
+          "total_flags": 0,
+          "high_severity": 0,
+          "medium_severity": 0,
+          "low_severity": 0
+        },
+        "news_sentiment": {
+          "total_articles": 4,
+          "positive": 3,
+          "neutral": 1,
+          "negative": 0,
+          "average_score": 0.48,
+          "positive_pct": 75.0,
+          "negative_pct": 0.0
+        }
+      }
+    },
+    {
+      "id": "tsla_risk_heavy",
+      "ticker": "TSLA",
+      "financial_data": {
+        "ticker": "TSLA",
+        "revenue": 96773000000,
+        "revenue_growth_yoy": 0.155,
+        "net_income": 14997000000,
+        "eps": 4.30,
+        "pe_ratio": 63.20,
+        "market_cap": 680000000000,
+        "debt_to_equity": 0.28,
+        "current_ratio": 1.69,
+        "free_cash_flow": 13250000000,
+        "source": "YAHOO_FMP"
+      },
+      "scores": {
+        "financial_health": 44,
+        "growth": 38,
+        "valuation": 25,
+        "moat": 41,
+        "predictability": 35,
+        "overall": 38
+      },
+      "red_flags": {
+        "total_flags": 3,
+        "high_severity": 3,
+        "medium_severity": 0,
+        "low_severity": 0,
+        "categories": {
+          "FINANCIAL": {
+            "HIGH": [
+              "High valuation risk",
+              "Earnings volatility",
+              "Margin pressure"
+            ]
+          }
+        }
+      },
+      "news_sentiment": {
+        "sentiment_summary": {
+          "total": 6,
+          "positive": 1,
+          "neutral": 1,
+          "negative": 4,
+          "average_score": -0.36,
+          "positive_pct": 16.7,
+          "negative_pct": 66.7
+        },
+        "articles": [
+          {
+            "title": "Tesla faces margin pressure"
+          }
+        ]
+      },
+      "expected": {
+        "workflow_status": "completed",
+        "recommendation": "STRONG SELL",
+        "confidence": 0.6,
+        "scores": {
+          "overall_score": 38,
+          "rating": "STRONG SELL",
+          "financial_health": 44,
+          "growth": 38,
+          "valuation": 25,
+          "moat": 41,
+          "predictability": 35
+        },
+        "red_flags": {
+          "total_flags": 3,
+          "high_severity": 3,
+          "medium_severity": 0,
+          "low_severity": 0
+        },
+        "news_sentiment": {
+          "total_articles": 6,
+          "positive": 1,
+          "neutral": 1,
+          "negative": 4,
+          "average_score": -0.36,
+          "positive_pct": 16.7,
+          "negative_pct": 66.7
+        }
+      }
+    },
+    {
+      "id": "intc_mixed_hold",
+      "ticker": "INTC",
+      "financial_data": {
+        "ticker": "INTC",
+        "revenue": 54228000000,
+        "revenue_growth_yoy": -0.014,
+        "net_income": -700000000,
+        "eps": -0.16,
+        "pe_ratio": 0,
+        "market_cap": 205000000000,
+        "debt_to_equity": 0.39,
+        "current_ratio": 1.63,
+        "free_cash_flow": -1200000000,
+        "source": "YAHOO_FMP"
+      },
+      "scores": {
+        "financial_health": 57,
+        "growth": 49,
+        "valuation": 54,
+        "moat": 52,
+        "predictability": 48,
+        "overall": 55
+      },
+      "red_flags": {
+        "total_flags": 1,
+        "high_severity": 0,
+        "medium_severity": 1,
+        "low_severity": 0,
+        "categories": {
+          "FINANCIAL": {
+            "MEDIUM": [
+              "Declining revenue trend"
+            ]
+          }
+        }
+      },
+      "news_sentiment": {
+        "sentiment_summary": {
+          "total": 3,
+          "positive": 1,
+          "neutral": 1,
+          "negative": 1,
+          "average_score": 0.05,
+          "positive_pct": 33.3,
+          "negative_pct": 33.3
+        },
+        "articles": [
+          {
+            "title": "Intel shows mixed turnaround progress"
+          }
+        ]
+      },
+      "expected": {
+        "workflow_status": "completed",
+        "recommendation": "HOLD",
+        "confidence": 0.8,
+        "scores": {
+          "overall_score": 55,
+          "rating": "HOLD",
+          "financial_health": 57,
+          "growth": 49,
+          "valuation": 54,
+          "moat": 52,
+          "predictability": 48
+        },
+        "red_flags": {
+          "total_flags": 1,
+          "high_severity": 0,
+          "medium_severity": 1,
+          "low_severity": 0
+        },
+        "news_sentiment": {
+          "total_articles": 3,
+          "positive": 1,
+          "neutral": 1,
+          "negative": 1,
+          "average_score": 0.05,
+          "positive_pct": 33.3,
+          "negative_pct": 33.3
+        }
+      }
+    }
+  ]
+}

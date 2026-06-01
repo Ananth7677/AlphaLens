@@ -54,6 +54,9 @@ conda run -n StablePythonEnv pytest tests/orchestration/test_orchestration.py
 # Run all tests
 conda run -n StablePythonEnv python run_tests.py
 
+# Run benchmark-style AI evaluation
+conda run -n StablePythonEnv python run_tests.py --eval
+
 # Run specific agent
 conda run -n StablePythonEnv python run_tests.py --agent financial
 conda run -n StablePythonEnv python run_tests.py --agent scorer
@@ -70,6 +73,17 @@ conda run -n StablePythonEnv python run_tests.py -v
 # Stop on first failure
 conda run -n StablePythonEnv python run_tests.py -x
 ```
+
+### Benchmark Evaluation
+The `--eval` mode runs a deterministic benchmark against `tests/fixtures/alphalens_eval_benchmark.json`.
+
+It checks:
+- final recommendation
+- overall score and dimension scores
+- red-flag counts
+- news sentiment summary
+
+Because the agents are mocked in this eval, it behaves like a CI regression test for the orchestration flow rather than a live API test.
 
 ## 📊 Test Coverage
 
@@ -162,6 +176,9 @@ Tests use the same environment variables as the main application:
 - `GEMINI_API_KEY` - For Gemini API tests
 - `FMP_API_KEY` - For FMP API tests (optional)
 - `TEST_DATABASE_URL` - Test database (defaults to alphalens_test)
+- `LANGCHAIN_TRACING_V2` - Optional, set `true` to trace tests/runs
+- `LANGSMITH_API_KEY` - Optional LangSmith API key for tracing
+- `LANGCHAIN_PROJECT` - Optional project name (e.g., `AlphaLens`)
 
 ### Test Database
 Tests use a separate test database configured in `conftest.py`. The database schema is created before tests and dropped after.
@@ -236,6 +253,7 @@ conda run -n StablePythonEnv pytest --cov=src tests/
 - Generate coverage report
 - Block merge if tests fail
 - Track coverage over time
+- Run `python run_tests.py --eval` as a quality gate for AI flow changes
 
 ## 📝 Adding New Tests
 

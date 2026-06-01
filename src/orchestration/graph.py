@@ -11,8 +11,10 @@ Defines the graph structure and execution order:
 """
 
 from datetime import datetime, timezone
+from typing import Optional, Dict, Any, List
 from langgraph.graph import StateGraph, END
 from .state import AnalysisState
+from .langsmith_config import is_langsmith_enabled, build_langsmith_config
 from .nodes import (
     financial_node,
     scorer_node,
@@ -61,7 +63,12 @@ def create_analysis_graph() -> StateGraph:
     return workflow.compile()
 
 
-async def run_analysis(ticker: str) -> dict:
+async def run_analysis(
+    ticker: str,
+    trace_metadata: Optional[Dict[str, Any]] = None,
+    trace_tags: Optional[List[str]] = None,
+    run_name: Optional[str] = None,
+) -> dict:
     """
     Run complete stock analysis workflow for a ticker.
     
@@ -99,7 +106,19 @@ async def run_analysis(ticker: str) -> dict:
     try:
         # Execute workflow
         print("🔄 Starting workflow execution...")
-        final_state = await graph.ainvoke(initial_state)
+        invoke_kwargs: Dict[str, Any] = {}
+        if is_langsmith_enabled():
+            print("🧭 LangSmith tracing enabled")
+            invoke_kwargs["config"] = build_langsmith_config(
+                ticker=ticker,
+                run_name=run_name,
+                trace_tags=trace_tags,
+                trace_metadata=trace_metadata,
+            )
+        else:
+            print("ℹ️ LangSmith tracing disabled (set LANGCHAIN_TRACING_V2 and LANGSMITH_API_KEY)")
+
+        final_state = await graph.ainvoke(initial_state, **invoke_kwargs)
         print("✅ Workflow execution completed")
         return final_state
     

@@ -1,7 +1,7 @@
 """
 Run this once to initialize the database.
 
-    python -m src.db0.init_db
+    python -m src.dbo.init_db
 
 What it does:
     1. Creates the pgvector extension

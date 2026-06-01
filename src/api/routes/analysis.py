@@ -116,7 +116,18 @@ async def analyze_stock(
         
         try:
             # Run complete orchestrated analysis
-            result = await run_analysis(ticker)
+            result = await run_analysis(
+                ticker,
+                run_name=f"API Analyze {ticker}",
+                trace_tags=["api", "sync"],
+                trace_metadata={
+                    "endpoint": "/api/v1/analyze/{ticker}",
+                    "async_mode": False,
+                    "include_sec_analysis": include_sec_analysis,
+                    "days_back_news": days_back_news,
+                    "max_articles": max_articles,
+                },
+            )
             
             # Handle case where orchestration returns string error instead of dict
             if isinstance(result, str):
@@ -352,7 +363,19 @@ async def run_background_analysis(
         background_analyses[analysis_id]["status"] = "running"
         
         # Run analysis
-        result = await run_analysis(ticker)
+        result = await run_analysis(
+            ticker,
+            run_name=f"API Background Analyze {ticker}",
+            trace_tags=["api", "background"],
+            trace_metadata={
+                "endpoint": "/api/v1/analyze/{ticker}",
+                "analysis_id": analysis_id,
+                "async_mode": True,
+                "include_sec_analysis": include_sec_analysis,
+                "days_back_news": days_back_news,
+                "max_articles": max_articles,
+            },
+        )
         
         # Store result
         background_analyses[analysis_id].update({
