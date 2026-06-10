@@ -6,7 +6,7 @@ Main application entry point that serves the API endpoints
 and integrates with the LangGraph orchestration system.
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
@@ -113,8 +113,8 @@ async def root():
             "health_check": "/api/v1/health",
             "financial_data": "/api/v1/financials/{ticker}",
             "investment_score": "/api/v1/scorecard/{ticker}",
-            "red_flags": "/api/v1/red-flags/{ticker}",
-            "news_sentiment": "/api/v1/news-sentiment/{ticker}",
+            "ask_about_ticker": "/api/v1/ask/{ticker}",
+            "ask_general": "/api/v1/ask",
             "docs": "/docs",
             "openapi": "/openapi.json"
         },

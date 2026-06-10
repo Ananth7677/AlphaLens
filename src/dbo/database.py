@@ -2,7 +2,6 @@
 from collections.abc import AsyncGenerator
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
 from dotenv import load_dotenv
 
@@ -16,9 +15,10 @@ DATABASE_URL = (
 )
 
 # Async Engine
+# Set SQL_ECHO=true to log every SQL statement (debugging only)
 engine = create_async_engine(
     DATABASE_URL,
-    echo=True,
+    echo=os.getenv("SQL_ECHO", "false").lower() == "true",
     pool_size=10,
     max_overflow=20,
     pool_pre_ping=True  # reconnects if connection was dropped
@@ -47,8 +47,6 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
-        finally:
-            await session.close()
 
 
 # Health check — used in GET /health endpoint

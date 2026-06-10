@@ -6,7 +6,6 @@ Provides endpoints for comprehensive stock analysis using the multi-agent system
 """
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query
-from fastapi.responses import JSONResponse
 from typing import Optional, Dict, Any, Union
 import asyncio
 import os
@@ -14,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 
 from ..schemas.analysis import (
-    AnalysisRequest, AnalysisResponse, QuestionRequest, QuestionResponse,
+    AnalysisResponse, QuestionRequest, QuestionResponse,
     AsyncAnalysisResponse, AnalysisStatusResponse, FinancialData, InvestmentScores,
     RedFlagsSummary, NewsSentiment, GeneralQuestionRequest, GeneralQuestionResponse,
     RedFlag, SECInsights
@@ -29,15 +28,20 @@ router = APIRouter()
 background_analyses: Dict[str, Dict[str, Any]] = {}
 
 
-async def get_db_session():
-    """Dependency to get database session with proper error handling."""
-    async for session in get_session():
-        try:
-            yield session
-        except Exception as e:
-            # Ensure rollback on any error
-            await session.rollback()
-            raise e
+def _financial_record_to_data(record) -> FinancialData:
+    """Map a stored financials DB record to the API FinancialData schema."""
+    return FinancialData(
+        revenue=record.revenue,
+        revenue_growth_yoy=record.revenue_growth_yoy,
+        net_income=record.net_income,
+        eps=record.eps,
+        pe_ratio=record.pe_ratio,
+        market_cap=record.market_cap,
+        debt_to_equity=record.debt_to_equity,
+        current_ratio=record.current_ratio,
+        free_cash_flow=record.free_cash_flow,
+        source=record.source,
+    )
 
 
 @router.post("/analyze/{ticker}", response_model=Union[AnalysisResponse, AsyncAnalysisResponse])
@@ -232,7 +236,7 @@ async def get_analysis_result(analysis_id: str) -> AnalysisResponse:
 @router.get("/financials/{ticker}", response_model=FinancialData)
 async def get_financial_data(
     ticker: str,
-    db: Any = Depends(get_db_session)
+    db: Any = Depends(get_session)
 ) -> FinancialData:
     """
     **Get Stored Financial Data**
@@ -253,18 +257,7 @@ async def get_financial_data(
                 detail=f"No stored financial data for {ticker}. Run POST /analyze/{ticker} first."
             )
 
-        return FinancialData(
-            revenue=record.revenue,
-            revenue_growth_yoy=record.revenue_growth_yoy,
-            net_income=record.net_income,
-            eps=record.eps,
-            pe_ratio=record.pe_ratio,
-            market_cap=record.market_cap,
-            debt_to_equity=record.debt_to_equity,
-            current_ratio=record.current_ratio,
-            free_cash_flow=record.free_cash_flow,
-            source=record.source,
-        )
+        return _financial_record_to_data(record)
 
     except HTTPException:
         raise
@@ -275,7 +268,7 @@ async def get_financial_data(
 @router.get("/scorecard/{ticker}", response_model=InvestmentScores)
 async def get_investment_scores(
     ticker: str,
-    db: Any = Depends(get_db_session)
+    db: Any = Depends(get_session)
 ) -> InvestmentScores:
     """
     **Get Stored Investment Scores**
@@ -322,7 +315,7 @@ async def get_investment_scores(
 async def ask_question_about_stock(
     ticker: str,
     request: QuestionRequest,
-    db: Any = Depends(get_db_session)
+    db: Any = Depends(get_session)
 ) -> QuestionResponse:
     """
     **Ask Questions About a Stock**
@@ -733,18 +726,7 @@ async def _gather_analysis_context(db, ticker: str, question: str, include_recen
             financial_record = await get_latest_financials(db, ticker)
             print(f"💰 Financial record found: {financial_record is not None}")
             if financial_record:
-                context["financial_data"] = {
-                    "revenue": financial_record.revenue,
-                    "revenue_growth_yoy": financial_record.revenue_growth_yoy,
-                    "net_income": financial_record.net_income,
-                    "eps": financial_record.eps,
-                    "pe_ratio": financial_record.pe_ratio,
-                    "market_cap": financial_record.market_cap,
-                    "debt_to_equity": financial_record.debt_to_equity,
-                    "current_ratio": financial_record.current_ratio,
-                    "free_cash_flow": financial_record.free_cash_flow,
-                    "source": financial_record.source
-                }
+                context["financial_data"] = _financial_record_to_data(financial_record).model_dump()
             
             # Get scores from database
             scorecard_record = await get_latest_scorecard(db, ticker)
@@ -944,7 +926,7 @@ async def _generate_answer(ticker: str, question: str, context: Dict[str, Any]) 
                 
             sources.append("Investment Scoring Analysis")
     
-    elif any(word in question_lower for word in ["future", "outlook", "prospects", "long term", "short term", "good for"]):
+    elif any(word in question_lower for word in ["future", "outlook", "prospects", "potential", "tomorrow", "long term", "short term", "good for"]):
         # Future/investment focused questions
         print(f"🔮 Processing future/investment question")
         
@@ -1061,9 +1043,9 @@ async def _generate_answer(ticker: str, question: str, context: Dict[str, Any]) 
         # Investment recommendation focused
         if "scores" in context:
             scores = context["scores"]
-            rating = scores.get("rating", "HOLD")
-            overall = scores.get("overall", 50)
-            
+            rating = scores.get("recommendation") or "HOLD"
+            overall = scores.get("overall_score", 0)
+
             answer_parts.append(f"Based on our comprehensive analysis, {ticker} receives a {rating} recommendation with an overall score of {overall}/100.")
             
             # Add reasoning
@@ -1101,38 +1083,6 @@ async def _generate_answer(ticker: str, question: str, context: Dict[str, Any]) 
                 sources.append("News Sentiment Analysis")
             else:
                 answer_parts.append(f"No recent news articles found for {ticker}.")
-    
-    elif any(word in question_lower for word in ["future", "outlook", "prospects", "potential", "tomorrow"]):
-        # Future outlook questions
-        answer_parts.append(f"To assess {ticker}'s future prospects, consider these key factors:")
-        
-        # Add current analysis context if available
-        if "scores" in context:
-            scores = context["scores"]
-            overall = scores.get("overall", 50)
-            growth_score = scores.get("growth", 50)
-            answer_parts.append(f"**Current Position**: Overall investment score {overall}/100, Growth potential {growth_score}/100")
-            sources.append("Investment Scoring Analysis")
-        
-        if "red_flags" in context:
-            flags = context["red_flags"]
-            flag_count = flags.get("total_flags", 0)
-            if flag_count > 0:
-                answer_parts.append(f"**Risk Assessment**: {flag_count} warning indicators detected")
-            else:
-                answer_parts.append("**Risk Assessment**: No major red flags identified")
-            sources.append("Red Flag Analysis")
-        
-        # Future assessment framework
-        answer_parts.append("""
-        **Key Future Indicators**:
-        - **Growth Drivers**: Market expansion, product innovation, competitive positioning
-        - **Financial Trajectory**: Revenue trends, profit margins, cash flow generation
-        - **Industry Outlook**: Sector dynamics, regulatory changes, technological shifts
-        - **Management Quality**: Strategic vision, capital allocation, execution history
-        
-        For comprehensive future analysis, run the full /analyze endpoint for detailed projections.
-        """)
     
     # Ground the answer in SEC filing text when relevant context was retrieved
     sec = context.get("sec_insights")

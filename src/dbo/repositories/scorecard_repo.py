@@ -60,6 +60,7 @@ async def upsert(db: AsyncSession, data: dict) -> Scorecard:
         moat_score=data.get("moat_score"),
         predictability_score=data.get("predictability_score"),
         overall_score=data.get("overall_score"),
+        recommendation=data.get("recommendation"),
         generated_at=data.get("generated_at", datetime.now(timezone.utc))
     )
     db.add(scorecard)

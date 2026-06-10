@@ -25,3 +25,18 @@ class TimestampMixin:
 
 def generate_uuid() -> str:
     return str(uuid.uuid4())
+
+
+def model_to_dict(model) -> dict:
+    """Convert a SQLAlchemy model to a plain dict, coercing Decimal to float."""
+    if model is None:
+        return {}
+
+    result = {}
+    for column in model.__table__.columns:
+        value = getattr(model, column.name)
+        if value is not None and hasattr(value, '__float__'):
+            value = float(value)
+        result[column.name] = value
+
+    return result

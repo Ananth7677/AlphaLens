@@ -9,6 +9,7 @@ Detects warning signs and risk indicators from:
 Categorizes flags by severity (LOW, MEDIUM, HIGH) and stores in red_flags table.
 """
 
+from src.dbo.models.base import model_to_dict as _model_to_dict
 from .financial_flags import detect_financial_flags
 from .filing_flags import detect_filing_flags
 from .flag_aggregator import aggregate_flags, store_flags
@@ -71,18 +72,3 @@ async def detect_red_flags(db, ticker: str) -> dict:
             "error": str(e),
             "flags": []
         }
-
-
-def _model_to_dict(model) -> dict:
-    """Convert SQLAlchemy model to dict."""
-    if model is None:
-        return {}
-    
-    result = {}
-    for column in model.__table__.columns:
-        value = getattr(model, column.name)
-        if value is not None and hasattr(value, '__float__'):
-            value = float(value)
-        result[column.name] = value
-    
-    return result

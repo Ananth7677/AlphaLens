@@ -6,12 +6,25 @@ Shows how to use the API endpoints for stock analysis.
 """
 
 import asyncio
+import socket
+
 import aiohttp
-import json
-from datetime import datetime
+import pytest
 
 API_BASE = "http://localhost:8000/api/v1"
 
+pytestmark = pytest.mark.integration
+
+
+def _server_running(host: str = "localhost", port: int = 8000) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+@pytest.mark.skipif(not _server_running(), reason="API server not running on localhost:8000")
 async def test_api():
     """Test the AlphaLens API endpoints."""
     

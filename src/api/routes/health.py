@@ -3,12 +3,11 @@
 Health check and system status API routes.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 import os
-import asyncio
 
 from src.dbo.database import check_db_connection
 

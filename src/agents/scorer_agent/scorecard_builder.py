@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.dbo.models.base import model_to_dict as _model_to_dict
 from .financial_health import calculate_financial_health_score
 from .growth_scorer import calculate_growth_score
 from .valuation_scorer import calculate_valuation_score
@@ -35,6 +36,25 @@ DEFAULT_WEIGHTS = {
     "moat": 0.20,
     "predictability": 0.15
 }
+
+
+def get_rating(overall_score: float) -> str:
+    """
+    Convert overall score (0-100) to rating label.
+
+    Single source of truth for the score → recommendation mapping, used by
+    both the scorecard builder (persisted) and the orchestration layer (API).
+    """
+    if overall_score >= 80:
+        return "STRONG BUY"
+    elif overall_score >= 70:
+        return "BUY"
+    elif overall_score >= 50:
+        return "HOLD"
+    elif overall_score >= 40:
+        return "SELL"
+    else:
+        return "STRONG SELL"
 
 
 def build_scorecard(ticker: str, scores: dict, weights: dict = None) -> dict:
@@ -72,23 +92,11 @@ def build_scorecard(ticker: str, scores: dict, weights: dict = None) -> dict:
             total_weight += weight
     
     overall_score = round(weighted_sum / total_weight, 2) if total_weight > 0 else 0
-    
-    # Determine recommendation based on overall score
-    if overall_score >= 75:
-        recommendation = "STRONG BUY"
-    elif overall_score >= 60:
-        recommendation = "BUY"
-    elif overall_score >= 40:
-        recommendation = "HOLD"
-    elif overall_score >= 25:
-        recommendation = "SELL"
-    else:
-        recommendation = "STRONG SELL"
-    
+
     return {
         "ticker": ticker,
         "overall_score": overall_score,
-        "recommendation": recommendation,
+        "recommendation": get_rating(overall_score),
         **scores  # Include all individual dimension scores
     }
 
@@ -186,6 +194,7 @@ async def build_scorecard_from_db(
         "moat_score": int(dimension_scores.get("moat")) if dimension_scores.get("moat") is not None else None,
         "predictability_score": int(dimension_scores.get("predictability")) if dimension_scores.get("predictability") is not None else None,
         "overall_score": int(round(overall_score)),
+        "recommendation": get_rating(overall_score),
         "generated_at": datetime.now(timezone.utc)
     }
     
@@ -197,39 +206,3 @@ async def build_scorecard_from_db(
     return scorecard
 
 
-def _model_to_dict(model) -> dict:
-    """Convert SQLAlchemy model to dict."""
-    if model is None:
-        return {}
-    
-    result = {}
-    for column in model.__table__.columns:
-        value = getattr(model, column.name)
-        # Convert Decimal to float for calculations
-        if value is not None and hasattr(value, '__float__'):
-            value = float(value)
-        result[column.name] = value
-    
-    return result
-
-
-def get_rating_label(score: float) -> str:
-    """
-    Convert numeric score to rating label.
-    
-    Args:
-        score: Overall score (0-100)
-    
-    Returns:
-        Rating label (Strong Buy, Buy, Hold, Sell, Strong Sell)
-    """
-    if score >= 80:
-        return "Strong Buy"
-    elif score >= 65:
-        return "Buy"
-    elif score >= 50:
-        return "Hold"
-    elif score >= 35:
-        return "Sell"
-    else:
-        return "Strong Sell"

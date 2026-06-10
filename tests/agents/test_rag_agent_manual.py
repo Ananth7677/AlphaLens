@@ -22,4 +22,5 @@ async def test():
         answer = await query_filings(db, "MSFT", "What are Microsoft's main risk factors?")
         print(answer["context"])
 
-asyncio.run(test())
+if __name__ == "__main__":
+    asyncio.run(test())

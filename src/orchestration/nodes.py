@@ -10,22 +10,9 @@ from typing import Dict, Any
 from .state import AnalysisState
 from src.agents.financial_agent import fetch_and_store_financials
 from src.agents.scorer_agent import score_company
+from src.agents.scorer_agent.scorecard_builder import get_rating as _get_rating
 from src.agents.red_flag_agent import detect_red_flags
 from src.agents.news_agent import analyze_news
-
-
-def _get_rating(overall_score: float) -> str:
-    """Convert overall score to rating."""
-    if overall_score >= 80:
-        return "STRONG BUY"
-    elif overall_score >= 70:
-        return "BUY"
-    elif overall_score >= 50:
-        return "HOLD"
-    elif overall_score >= 40:
-        return "SELL"
-    else:
-        return "STRONG SELL"
 
 
 async def financial_node(state: AnalysisState) -> Dict[str, Any]:
@@ -105,14 +92,7 @@ async def scorer_node(state: AnalysisState) -> Dict[str, Any]:
         
         async for db in get_session():
             result = await score_company(db, ticker)
-            
-            # Debug logging
-            print(f"Scorer result type: {type(result)}")
-            if isinstance(result, dict):
-                print(f"Scorer has error: {result.get('error', 'None')}")
-            else:
-                print(f"Scorer returned unexpected type: {result}")
-            
+
             if result.get("error"):
                 return {
                     "scores": None,
@@ -166,14 +146,7 @@ async def red_flag_node(state: AnalysisState) -> Dict[str, Any]:
         
         async for db in get_session():
             result = await detect_red_flags(db, ticker)
-            
-            # Debug logging
-            print(f"Red flags result type: {type(result)}")
-            if isinstance(result, dict):
-                print(f"Red flags has error: {result.get('error', 'None')}")
-            else:
-                print(f"Red flags returned unexpected type: {result}")
-            
+
             if result.get("error"):
                 return {
                     "red_flags": None,
@@ -187,7 +160,9 @@ async def red_flag_node(state: AnalysisState) -> Dict[str, Any]:
                     "high_severity": result["high_severity"],
                     "medium_severity": result["medium_severity"],
                     "low_severity": result["low_severity"],
-                    "categories": result["categories"]
+                    "categories": result["categories"],
+                    # Keep individual flag details so the API response can surface them
+                    "flags": result.get("flags", [])
                 },
                 "red_flag_error": None
             }
